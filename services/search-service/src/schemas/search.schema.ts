@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 // Search Artists Schema
 export const searchArtistsSchema = z.object({
+  q: z.string().optional(),
   query: z.string().optional(),
   city: z.string().optional(),
   state: z.string().optional(),
@@ -80,6 +81,7 @@ export const smartSearchSchema = z.object({
   minPrice: z.coerce.number().min(0).optional(),
   maxPrice: z.coerce.number().min(0).optional(),
   minGuests: z.coerce.number().min(1).optional(),
+  isVerified: z.coerce.boolean().optional(),
 });
 
 export type SmartSearchInput = z.infer<typeof smartSearchSchema>;
