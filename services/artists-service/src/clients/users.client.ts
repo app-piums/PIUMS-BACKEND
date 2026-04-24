@@ -13,10 +13,13 @@ export interface UserProfile {
 }
 
 class UsersClient {
-  async getUser(userId: string): Promise<UserProfile | null> {
+  async getUser(userId: string, authToken?: string): Promise<UserProfile | null> {
     try {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (authToken) headers['Authorization'] = `Bearer ${authToken}`;
+
       const res = await fetch(`${USERS_SERVICE_URL}/api/users/${userId}`, {
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         signal: AbortSignal.timeout(4000),
       });
       if (!res.ok) return null;
