@@ -24,6 +24,8 @@ model ArtistIndex {
   // Profile Data
   bio         String?  @db.Text
   specialties String[] // Array of specialties
+  avatar      String?  // URL de foto de perfil
+  coverPhoto  String?  // URL de foto de portada
   
   // Location
   city        String?
