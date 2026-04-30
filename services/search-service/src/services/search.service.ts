@@ -418,8 +418,6 @@ export class SearchService {
           email: artist.email,
           bio: artist.bio,
           specialties: artist.specialties || [],
-          avatar: (artist as any).avatar ?? null,
-          coverPhoto: (artist as any).coverPhoto ?? null,
           city: artist.city,
           state: artist.state,
           country: artist.country,
