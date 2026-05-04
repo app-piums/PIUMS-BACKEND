@@ -34,7 +34,7 @@ export class PaymentsServiceClient {
         return {
           totalRevenue: 0,
           thisMonthRevenue: 0,
-          currency: "GTQ",
+          currency: "USD",
           completedPayments: 0,
           pendingPayments: 0,
         };
@@ -49,7 +49,7 @@ export class PaymentsServiceClient {
       return {
         totalRevenue: 0,
         thisMonthRevenue: 0,
-        currency: "GTQ",
+        currency: "USD",
         completedPayments: 0,
         pendingPayments: 0,
       };

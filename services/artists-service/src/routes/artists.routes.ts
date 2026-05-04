@@ -26,6 +26,25 @@ const router = Router();
 // ─── Internal service-to-service routes (internal network only) ─────────────
 // Validates a shared internal secret header to prevent abuse if accidentally exposed.
 
+// GET /artists/internal/auth-ids?category=MUSICO — returns authIds for admin user filtering
+router.get("/internal/auth-ids", async (req, res, next) => {
+  try {
+    const internalSecret = process.env.INTERNAL_SERVICE_SECRET;
+    const providedSecret = req.headers['x-internal-secret'];
+    if (!internalSecret || providedSecret !== internalSecret) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+    const { category } = req.query;
+    const where: any = { deletedAt: null };
+    if (category) where.category = (category as string).toUpperCase();
+
+    const artists = await prisma.artist.findMany({ where, select: { authId: true } });
+    res.json({ authIds: artists.map((a: any) => a.authId) });
+  } catch (error) {
+    next(error);
+  }
+});
+
 router.get("/internal/by-auth/:authId", async (req, res, next) => {
   try {
     const internalSecret = process.env.INTERNAL_SERVICE_SECRET;

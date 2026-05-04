@@ -3,6 +3,7 @@ import { logger } from '../utils/logger';
 import { prisma } from '../lib/prisma';
 import { bookingClient } from '../clients/booking.client';
 import { reviewsClient } from '../clients/reviews.client';
+import { artistsClient } from '../clients/artists.client';
 
 // GET /api/admin/stats - Métricas generales
 export const getStats = async (req: Request, res: Response, next: NextFunction) => {
@@ -53,23 +54,46 @@ export const getStats = async (req: Request, res: Response, next: NextFunction) 
 // GET /api/admin/users - Lista usuarios
 export const getUsers = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { page = '1', limit = '20', search = '', role = '' } = req.query;
-    
+    const { page = '1', limit = '20', search = '', role = '', provider = '', category = '' } = req.query;
+
     const skip = (parseInt(page as string) - 1) * parseInt(limit as string);
     const take = parseInt(limit as string);
 
     const where: any = {};
-    
-    if (search) {
-      where.OR = [
-        { email: { contains: search as string, mode: 'insensitive' } },
-        { name: { contains: search as string, mode: 'insensitive' } }
-      ];
-    }
-    
+    const andConditions: any[] = [];
+
     if (role) {
-      where.role = role === 'user' ? 'cliente' : (role === 'artist' ? 'artista' : role);
+      where.role = role === 'user' ? 'cliente' : role === 'artist' ? 'artista' : role as string;
     }
+
+    if (search) {
+      andConditions.push({
+        OR: [
+          { email: { contains: search as string, mode: 'insensitive' } },
+          { name: { contains: search as string, mode: 'insensitive' } },
+          { nombre: { contains: search as string, mode: 'insensitive' } },
+        ],
+      });
+    }
+
+    if (provider) {
+      if (provider === 'email') {
+        andConditions.push({ OR: [{ provider: 'email' }, { provider: null }] });
+      } else {
+        andConditions.push({ provider: provider as string });
+      }
+    }
+
+    if (category) {
+      const authIds = await artistsClient.getAuthIdsByCategory(category as string);
+      if (authIds.length === 0) {
+        return res.json({ users: [], total: 0, page: parseInt(page as string), totalPages: 0 });
+      }
+      andConditions.push({ id: { in: authIds } });
+      if (!where.role) where.role = 'artista';
+    }
+
+    if (andConditions.length > 0) where.AND = andConditions;
 
     const [users, total] = await Promise.all([
       prisma.user.findMany({
@@ -82,6 +106,7 @@ export const getUsers = async (req: Request, res: Response, next: NextFunction) 
           email: true,
           name: true,
           role: true,
+          provider: true,
           isBlocked: true,
           isVerified: true,
           createdAt: true,
@@ -101,6 +126,7 @@ export const getUsers = async (req: Request, res: Response, next: NextFunction) 
       nombre: u.name ?? u.nombre ?? u.email.split('@')[0],
       email: u.email,
       role: u.role,
+      provider: u.provider ?? 'email',
       isBlocked: u.isBlocked ?? false,
       createdAt: u.createdAt,
     }));
@@ -172,6 +198,115 @@ export const deleteUser = async (req: Request, res: Response, next: NextFunction
     res.json({ message: 'User deleted successfully', id });
   } catch (error: any) {
     logger.error(`Error deleting user: ${error.message}`, 'ADMIN_CONTROLLER');
+    next(error);
+  }
+};
+
+// GET /api/admin/users/export - Exportar usuarios como CSV
+export const exportUsers = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { search = '', role = '', provider = '', category = '' } = req.query;
+
+    const where: any = { deletedAt: null };
+    const andConditions: any[] = [];
+
+    if (role) {
+      where.role = role === 'user' ? 'cliente' : role === 'artist' ? 'artista' : role as string;
+    }
+
+    if (search) {
+      andConditions.push({
+        OR: [
+          { email: { contains: search as string, mode: 'insensitive' } },
+          { name: { contains: search as string, mode: 'insensitive' } },
+          { nombre: { contains: search as string, mode: 'insensitive' } },
+        ],
+      });
+    }
+
+    if (provider) {
+      if (provider === 'email') {
+        andConditions.push({ OR: [{ provider: 'email' }, { provider: null }] });
+      } else {
+        andConditions.push({ provider: provider as string });
+      }
+    }
+
+    if (category) {
+      const authIds = await artistsClient.getAuthIdsByCategory(category as string);
+      if (authIds.length === 0) {
+        const csv = '\uFEFF' + 'ID,Nombre,Email,Rol,Origen,Estado,Verificado,Ciudad,Fecha registro,Último acceso\r\n';
+        const date = new Date().toISOString().slice(0, 10);
+        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+        res.setHeader('Content-Disposition', `attachment; filename="usuarios-piums-${date}.csv"`);
+        return res.send(csv);
+      }
+      andConditions.push({ id: { in: authIds } });
+      if (!where.role) where.role = 'artista';
+    }
+
+    if (andConditions.length > 0) where.AND = andConditions;
+
+    const users = await prisma.user.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        nombre: true,
+        role: true,
+        provider: true,
+        isBlocked: true,
+        isVerified: true,
+        ciudad: true,
+        createdAt: true,
+        lastLoginAt: true,
+      },
+    });
+
+    // BOM UTF-8 para compatibilidad con Excel
+    const BOM = '\uFEFF';
+    const headers = ['ID', 'Nombre', 'Email', 'Rol', 'Origen', 'Estado', 'Verificado', 'Ciudad', 'Fecha registro', 'Último acceso'];
+
+    const escapeCell = (val: unknown): string => {
+      const str = val == null ? '' : String(val);
+      // Wrap in quotes if contains comma, newline or quote
+      if (str.includes(',') || str.includes('\n') || str.includes('"')) {
+        return `"${str.replace(/"/g, '""')}"`;
+      }
+      return str;
+    };
+
+    const rows = users.map((u: any) => [
+      escapeCell(u.id),
+      escapeCell(u.name ?? u.nombre ?? ''),
+      escapeCell(u.email),
+      escapeCell(u.role),
+      escapeCell(u.provider ?? 'email'),
+      escapeCell(u.isBlocked ? 'Bloqueado' : 'Activo'),
+      escapeCell(u.isVerified ? 'Sí' : 'No'),
+      escapeCell(u.ciudad ?? ''),
+      escapeCell(u.createdAt ? new Date(u.createdAt).toISOString().slice(0, 10) : ''),
+      escapeCell(u.lastLoginAt ? new Date(u.lastLoginAt).toISOString().slice(0, 10) : ''),
+    ].join(','));
+
+    const csv = BOM + [headers.join(','), ...rows].join('\r\n');
+
+    const date = new Date().toISOString().slice(0, 10);
+    const filename = `usuarios-piums-${date}.csv`;
+
+    logger.info('Admin exported users CSV', 'ADMIN_CONTROLLER', {
+      adminId: (req as any).user?.id,
+      count: users.length,
+      filters: { role, provider, search },
+    });
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(csv);
+  } catch (error: any) {
+    logger.error(`Error exporting users CSV: ${error.message}`, 'ADMIN_CONTROLLER');
     next(error);
   }
 };

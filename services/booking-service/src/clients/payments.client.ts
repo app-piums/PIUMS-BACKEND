@@ -60,7 +60,7 @@ export class PaymentsClient {
         body: JSON.stringify({
           bookingId: payload.bookingId,
           amount: payload.amount,
-          currency: payload.currency || 'GTQ',
+          currency: payload.currency || 'USD',
           paymentType: payload.paymentType,
         }),
       });

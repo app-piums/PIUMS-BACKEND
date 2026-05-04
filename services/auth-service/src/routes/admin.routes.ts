@@ -3,6 +3,7 @@ import { isAdmin } from '../middleware/isAdmin';
 import {
   getStats,
   getUsers,
+  exportUsers,
   toggleBlockUser,
   deleteUser,
   getArtists,
@@ -25,6 +26,7 @@ router.get('/stats', getStats);
 
 // Users management
 router.get('/users', getUsers);
+router.get('/users/export', exportUsers);
 router.get('/users/:id', getUserDetail);
 router.patch('/users/:id/block', toggleBlockUser);
 router.delete('/users/:id', deleteUser);

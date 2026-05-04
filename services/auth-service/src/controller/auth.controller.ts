@@ -49,6 +49,7 @@ async function createUserAndRespond(
       nombre,
       email,
       passwordHash,
+      provider: 'email',
       role,             // ✅ Guardar rol correcto (artista / cliente)
       emailVerified: isDev,
       status: userStatus,
