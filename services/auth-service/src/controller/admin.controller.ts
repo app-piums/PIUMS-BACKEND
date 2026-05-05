@@ -8,18 +8,25 @@ import { artistsClient } from '../clients/artists.client';
 // GET /api/admin/stats - Métricas generales
 export const getStats = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    // Obtener stats de diferentes servicios
-    // Nota: En producción, estos datos vendrían de los microservicios correspondientes
-    
+    const period = (req.query.period as string) || '6m';
+    const months =
+      period === '7d' ? 1 :
+      period === '30d' ? 1 :
+      period === '3m' ? 3 :
+      period === '1y' ? 12 : 6;
+
     const [
-      totalUsers, 
-      totalArtists, 
+      totalUsers,
+      totalArtists,
+      verifiedArtists,
       recentUsers,
       bookingStats,
-      reportStats
+      reportStats,
+      categoryStats,
     ] = await Promise.all([
       prisma.user.count(),
       prisma.user.count({ where: { role: 'artista' } }),
+      prisma.user.count({ where: { role: 'artista', isVerified: true } }),
       prisma.user.count({
         where: {
           createdAt: {
@@ -27,20 +34,58 @@ export const getStats = async (req: Request, res: Response, next: NextFunction) 
           }
         }
       }),
-      bookingClient.getStats(),
-      reviewsClient.getStats(req.headers.authorization)
+      bookingClient.getStats(months),
+      reviewsClient.getStats(req.headers.authorization),
+      artistsClient.getCategoryStats(),
     ]);
+
+    // usersByMonth
+    const now = new Date();
+    const usersByMonthArr = [];
+    for (let i = months - 1; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const nextD = new Date(now.getFullYear(), now.getMonth() - i + 1, 1);
+      const count = await prisma.user.count({ where: { createdAt: { gte: d, lt: nextD } } });
+      usersByMonthArr.push({ month: d.toLocaleString('es-ES', { month: 'short' }), count });
+    }
+
+    // topArtists con nombres
+    const topArtistsRaw = bookingStats.topArtists ?? [];
+    let topArtists: any[] = [];
+    if (topArtistsRaw.length > 0) {
+      // Buscar nombre del artista en artists-service por su artistId
+      const artistInfoList = await artistsClient.getByIds(topArtistsRaw.map((a) => a.artistId));
+      const artistInfoMap = new Map(artistInfoList.map((a) => [a.id, a]));
+      topArtists = topArtistsRaw.map((a) => {
+        const info = artistInfoMap.get(a.artistId);
+        return {
+          artistId: a.artistId,
+          nombre: info?.nombre ?? a.artistId.slice(0, 8),
+          bookings: a.bookings,
+          revenue: a.revenue / 100,
+        };
+      });
+    }
+
+    const artistsByCategory = Object.entries(categoryStats)
+      .map(([category, count]) => ({ category, count: count as number }))
+      .sort((a, b) => b.count - a.count);
 
     const stats = {
       totalUsers,
       totalArtists,
       totalBookings: bookingStats.total,
-      totalRevenue: bookingStats.totalRevenue / 100, // Convertir de centavos a moneda
+      totalRevenue: bookingStats.totalRevenue / 100,
       recentUsers,
       bookingsThisMonth: bookingStats.bookingsThisMonth || 0,
       revenueThisMonth: (bookingStats.revenueThisMonth || 0) / 100,
       pendingReports: reportStats.pendingCount,
-      bookingsByMonth: bookingStats.bookingsByMonth || []
+      bookingsByMonth: bookingStats.bookingsByMonth || [],
+      revenueByMonth: (bookingStats.revenueByMonth ?? []).map((r) => ({ ...r, amount: r.amount / 100 })),
+      usersByMonth: usersByMonthArr,
+      artistsByCategory,
+      topArtists,
+      conversionFunnel: { totalUsers, totalArtists, verifiedArtists },
     };
 
     logger.info('Admin stats retrieved', 'ADMIN_CONTROLLER', { adminId: (req as any).user?.id });
@@ -129,6 +174,7 @@ export const getUsers = async (req: Request, res: Response, next: NextFunction) 
       provider: u.provider ?? 'email',
       isBlocked: u.isBlocked ?? false,
       createdAt: u.createdAt,
+      lastLoginAt: u.lastLoginAt ?? null,
     }));
 
     const totalPages = Math.ceil(total / take);
@@ -147,13 +193,21 @@ export const toggleBlockUser = async (req: Request, res: Response, next: NextFun
 
     const user = await prisma.user.update({
       where: { id },
-      data: { isBlocked }
+      data: {
+        isBlocked,
+        status: isBlocked ? 'BANNED' : 'ACTIVE',
+      },
     });
+
+    // Si es artista, propagar el estado a artists-service para sacarlo/meterlo de búsquedas
+    if (user.role === 'artista') {
+      artistsClient.setActive(id, !isBlocked).catch(() => {});
+    }
 
     logger.info(`User ${isBlocked ? 'blocked' : 'unblocked'}`, 'ADMIN_CONTROLLER', {
       adminId: (req as any).user?.id,
       userId: id,
-      reason
+      reason,
     });
 
     res.json({ message: `User ${isBlocked ? 'blocked' : 'unblocked'} successfully`, user });
@@ -314,23 +368,37 @@ export const exportUsers = async (req: Request, res: Response, next: NextFunctio
 // GET /api/admin/artists - Lista artistas
 export const getArtists = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { page = '1', limit = '20', search = '', verified = '' } = req.query;
+    const { page = '1', limit = '20', search = '', verified = '', category = '' } = req.query;
     
     const skip = (parseInt(page as string) - 1) * parseInt(limit as string);
     const take = parseInt(limit as string);
 
     const where: any = { role: 'artista' };
+    const andConditions: any[] = [];
     
     if (search) {
-      where.OR = [
-        { email: { contains: search as string, mode: 'insensitive' } },
-        { name: { contains: search as string, mode: 'insensitive' } }
-      ];
+      andConditions.push({
+        OR: [
+          { email: { contains: search as string, mode: 'insensitive' } },
+          { name: { contains: search as string, mode: 'insensitive' } },
+          { nombre: { contains: search as string, mode: 'insensitive' } },
+        ]
+      });
     }
     
     if (verified !== '') {
       where.isVerified = verified === 'true';
     }
+
+    if (category) {
+      const authIds = await artistsClient.getAuthIdsByCategory(category as string);
+      if (authIds.length === 0) {
+        return res.json({ artists: [], total: 0, page: parseInt(page as string), totalPages: 0 });
+      }
+      andConditions.push({ id: { in: authIds } });
+    }
+
+    if (andConditions.length > 0) where.AND = andConditions;
 
     const [artists, total] = await Promise.all([
       prisma.user.findMany({
@@ -555,8 +623,8 @@ export const getBookingDetail = async (req: Request, res: Response, next: NextFu
 // GET /api/admin/bookings - Lista todas las reservas
 export const getBookings = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { page = '1', limit = '20', search = '', status = '' } = req.query;
-    logger.info(`ADMIN_GET_BOOKINGS_DIAG: page=${page}, search=${search}, status=${status}`, 'ADMIN_CONTROLLER');
+    const { page = '1', limit = '20', search = '', status = '', dateFrom = '', dateTo = '' } = req.query;
+    logger.info(`ADMIN_GET_BOOKINGS_DIAG: page=${page}, search=${search}, status=${status}, dateFrom=${dateFrom}, dateTo=${dateTo}`, 'ADMIN_CONTROLLER');
     
     // Mapear estado de español (frontend) a inglés (backend/DB)
     const STATUS_MAP: Record<string, string> = {
@@ -586,7 +654,9 @@ export const getBookings = async (req: Request, res: Response, next: NextFunctio
       page,
       limit,
       search: effectiveSearch,
-      status: mappedStatus
+      status: mappedStatus,
+      ...(dateFrom ? { dateFrom: dateFrom as string } : {}),
+      ...(dateTo ? { dateTo: dateTo as string } : {}),
     });
 
     // Obtener nombres de usuarios y artistas de una vez

@@ -27,6 +27,7 @@ async function createUserAndRespond(
   extra?: {
     ciudad?: string;
     birthDate?: string;
+    avatarUrl?: string;
     documentType?: string;
     documentNumber?: string;
     documentFrontUrl?: string;
@@ -40,6 +41,21 @@ async function createUserAndRespond(
     throw new AppError(409, "Este correo electrónico ya está registrado");
   }
 
+  // Bloquear re-registro si el documento ya está vinculado a una cuenta baneada/bloqueada
+  if (extra?.documentType && extra?.documentNumber) {
+    const bannedDoc = await prisma.user.findFirst({
+      where: {
+        documentType: extra.documentType,
+        documentNumber: extra.documentNumber,
+        OR: [{ status: 'BANNED' }, { isBlocked: true }],
+      },
+      select: { id: true },
+    });
+    if (bannedDoc) {
+      throw new AppError(403, 'No es posible crear una cuenta con este documento de identidad');
+    }
+  }
+
   const passwordHash = await hashPassword(password);
   const isDev = process.env.NODE_ENV !== 'production';
   const userStatus = isDev ? 'ACTIVE' : 'PENDING_EMAIL';
@@ -50,9 +66,10 @@ async function createUserAndRespond(
       email,
       passwordHash,
       provider: 'email',
-      role,             // ✅ Guardar rol correcto (artista / cliente)
+      role,
       emailVerified: isDev,
       status: userStatus,
+      avatar: extra?.avatarUrl,
       ciudad: extra?.ciudad,
       birthDate: extra?.birthDate ? new Date(extra.birthDate) : undefined,
       documentType: extra?.documentType,
@@ -163,9 +180,9 @@ export const register = async (req: Request, res: Response, next: NextFunction) 
 // ─────────────────────────────────────────────────────────────────────────
 export const registerArtist = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { nombre, email, password, ciudad, birthDate, documentType, documentNumber, documentFrontUrl, documentBackUrl, documentSelfieUrl } = registerArtistSchema.parse(req.body);
+    const { nombre, email, password, ciudad, birthDate, avatarUrl, documentType, documentNumber, documentFrontUrl, documentBackUrl, documentSelfieUrl } = registerArtistSchema.parse(req.body);
     await createUserAndRespond(req, res, nombre, email, password, 'artista', {
-      ciudad, birthDate, documentType, documentNumber, documentFrontUrl, documentBackUrl, documentSelfieUrl,
+      ciudad, birthDate, avatarUrl, documentType, documentNumber, documentFrontUrl, documentBackUrl, documentSelfieUrl,
     });
   } catch (error: any) {
     logger.error("Error en registro de artista", "AUTH_CONTROLLER", { message: error.message });

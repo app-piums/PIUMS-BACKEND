@@ -481,8 +481,8 @@ export class BookingController {
 
   async getAdminStats(req: Request, res: Response, next: NextFunction) {
     try {
-      // TODO: Verificar que el usuario es admin (podría hacerse vía middleware)
-      const stats = await bookingService.getAdminStats();
+      const months = req.query.months ? parseInt(req.query.months as string, 10) : 6;
+      const stats = await bookingService.getAdminStats(months);
       res.json(stats);
     } catch (error) {
       next(error);

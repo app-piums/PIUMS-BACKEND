@@ -24,12 +24,13 @@ export const registerSchema = z.object({
 });
 
 // Schema específico para registro de artistas (rol fijo: artista)
-// Requiere documento de identidad obligatorio
+// Requiere documento de identidad y foto de perfil obligatorios
 export const registerArtistSchema = baseRegisterSchema.extend({
   role: z.literal("artista").default("artista"),
   nombreArtistico: z.string().max(50).optional(),
   ciudad: z.string().min(2, "Ingresa tu ciudad"),
   birthDate: z.string().datetime({ offset: true }).or(z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Fecha inválida")),
+  avatarUrl: z.string().url("URL de foto de perfil inválida"),
   documentType: z.enum(["DPI", "PASSPORT", "RESIDENCE_CARD"], { errorMap: () => ({ message: "Tipo de documento inválido" }) }),
   documentNumber: z.string().min(6, "Número de documento muy corto").max(20, "Número de documento muy largo"),
   documentFrontUrl: z.string().url("URL del documento inválida"),

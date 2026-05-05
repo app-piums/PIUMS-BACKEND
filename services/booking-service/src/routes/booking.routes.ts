@@ -248,8 +248,12 @@ router.get(
 
 router.post(
   "/bookings/admin/batch-stats",
-  authenticateToken,
-  requireAdmin,
+  (req, res, next) => {
+    const secret = req.headers["x-internal-secret"];
+    const INTERNAL_SECRET = process.env.INTERNAL_SERVICE_SECRET || "";
+    if (INTERNAL_SECRET && secret === INTERNAL_SECRET) return next();
+    return authenticateToken(req, res, (err) => { if (err) return next(err); return requireAdmin(req, res, next); });
+  },
   bookingController.getBatchStats.bind(bookingController)
 );
 
@@ -259,8 +263,16 @@ router.post(
  */
 router.get(
   "/bookings/stats/admin",
-  authenticateToken,
-  requireAdmin,
+  (req, res, next) => {
+    // Acepta internal secret O JWT admin
+    const secret = req.headers["x-internal-secret"];
+    const INTERNAL_SECRET = process.env.INTERNAL_SERVICE_SECRET || "";
+    if (INTERNAL_SECRET && secret === INTERNAL_SECRET) return next();
+    return authenticateToken(req, res, (err) => {
+      if (err) return next(err);
+      return requireAdmin(req, res, next);
+    });
+  },
   bookingController.getAdminStats.bind(bookingController)
 );
 
@@ -270,8 +282,12 @@ router.get(
  */
 router.get(
   "/bookings/admin/search",
-  authenticateToken,
-  requireAdmin,
+  (req, res, next) => {
+    const secret = req.headers["x-internal-secret"];
+    const INTERNAL_SECRET = process.env.INTERNAL_SERVICE_SECRET || "";
+    if (INTERNAL_SECRET && secret === INTERNAL_SECRET) return next();
+    return authenticateToken(req, res, (err) => { if (err) return next(err); return requireAdmin(req, res, next); });
+  },
   bookingController.adminSearchBookings.bind(bookingController)
 );
 
@@ -281,8 +297,12 @@ router.get(
  */
 router.get(
   "/bookings/admin/:id",
-  authenticateToken,
-  requireAdmin,
+  (req, res, next) => {
+    const secret = req.headers["x-internal-secret"];
+    const INTERNAL_SECRET = process.env.INTERNAL_SERVICE_SECRET || "";
+    if (INTERNAL_SECRET && secret === INTERNAL_SECRET) return next();
+    return authenticateToken(req, res, (err) => { if (err) return next(err); return requireAdmin(req, res, next); });
+  },
   bookingController.adminGetBookingById.bind(bookingController)
 );
 

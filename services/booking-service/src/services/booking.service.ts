@@ -1346,7 +1346,7 @@ export class BookingService {
         },
       }),
       prisma.booking.aggregate({
-        where: { ...where, paymentStatus: "FULLY_PAID" },
+        where: { ...where, status: { notIn: ["CANCELLED_CLIENT", "CANCELLED_ARTIST", "REJECTED"] } },
         _sum: { totalPrice: true },
       }),
     ]);
@@ -1366,7 +1366,7 @@ export class BookingService {
   /**
    * Obtiene estadísticas globales para el admin
    */
-  async getAdminStats() {
+  async getAdminStats(months: number = 6) {
     const now = new Date();
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
     
@@ -1374,27 +1374,33 @@ export class BookingService {
       stats,
       revenueThisMonth,
       bookingsThisMonth,
-      bookingsByMonth
+      bookingsByMonth,
+      revenueByMonth,
+      topArtists,
     ] = await Promise.all([
       this.getBookingStats(),
       prisma.booking.aggregate({
         where: {
-          paymentStatus: "FULLY_PAID",
-          paidAt: { gte: startOfMonth }
+          status: { notIn: ["CANCELLED_CLIENT", "CANCELLED_ARTIST", "REJECTED"] },
+          scheduledDate: { gte: startOfMonth }
         },
         _sum: { totalPrice: true }
       }),
       prisma.booking.count({
         where: { createdAt: { gte: startOfMonth } }
       }),
-      this.getBookingsByMonth(6)
+      this.getBookingsByMonth(months),
+      this.getRevenueByMonth(months),
+      this.getTopArtistsByBookings(months, 5),
     ]);
 
     return {
       ...stats,
       revenueThisMonth: revenueThisMonth._sum.totalPrice || 0,
       bookingsThisMonth,
-      bookingsByMonth
+      bookingsByMonth,
+      revenueByMonth,
+      topArtists,
     };
   }
 
@@ -1423,6 +1429,49 @@ export class BookingService {
     }
     
     return result;
+  }
+
+  private async getRevenueByMonth(monthsCount: number) {
+    const result = [];
+    const now = new Date();
+
+    for (let i = monthsCount - 1; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const nextD = new Date(now.getFullYear(), now.getMonth() - i + 1, 1);
+
+      const agg = await prisma.booking.aggregate({
+        where: { status: { notIn: ['CANCELLED_CLIENT', 'CANCELLED_ARTIST', 'REJECTED'] }, scheduledDate: { gte: d, lt: nextD } },
+        _sum: { totalPrice: true },
+      });
+
+      const monthName = d.toLocaleString('es-ES', { month: 'short' });
+      result.push({ month: monthName, amount: Number(agg._sum.totalPrice ?? 0) });
+    }
+
+    return result;
+  }
+
+  private async getTopArtistsByBookings(monthsCount: number, limit: number) {
+    const periodStart = new Date(
+      new Date().getFullYear(),
+      new Date().getMonth() - monthsCount + 1,
+      1
+    );
+
+    const grouped = await prisma.booking.groupBy({
+      by: ['artistId'],
+      where: { createdAt: { gte: periodStart } },
+      _count: { id: true },
+      _sum: { totalPrice: true },
+      orderBy: { _count: { id: 'desc' } },
+      take: limit,
+    });
+
+    return grouped.map((g) => ({
+      artistId: g.artistId,
+      bookings: g._count.id,
+      revenue: Number(g._sum.totalPrice ?? 0),
+    }));
   }
 
   /**

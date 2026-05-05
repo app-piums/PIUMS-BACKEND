@@ -45,6 +45,49 @@ router.get("/internal/auth-ids", async (req, res, next) => {
   }
 });
 
+// GET /artists/internal/stats — returns artist counts by category
+router.get("/internal/stats", async (req, res, next) => {
+  try {
+    const internalSecret = process.env.INTERNAL_SERVICE_SECRET;
+    const providedSecret = req.headers['x-internal-secret'];
+    if (!internalSecret || providedSecret !== internalSecret) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+    const grouped = await prisma.artist.groupBy({
+      by: ['category'],
+      where: { deletedAt: null },
+      _count: { id: true },
+    });
+    const byCategory: Record<string, number> = {};
+    for (const g of grouped) {
+      if (g.category) byCategory[g.category] = g._count.id;
+    }
+    res.json({ byCategory });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// POST /artists/internal/by-ids — returns artist info for a list of artist IDs
+router.post("/internal/by-ids", async (req, res, next) => {
+  try {
+    const internalSecret = process.env.INTERNAL_SERVICE_SECRET;
+    const providedSecret = req.headers['x-internal-secret'];
+    if (!internalSecret || providedSecret !== internalSecret) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+    const { ids } = req.body as { ids: string[] };
+    if (!Array.isArray(ids) || ids.length === 0) return res.json({ artists: [] });
+    const artists = await prisma.artist.findMany({
+      where: { id: { in: ids }, deletedAt: null },
+      select: { id: true, authId: true, nombre: true, category: true },
+    });
+    res.json({ artists });
+  } catch (error) {
+    next(error);
+  }
+});
+
 router.get("/internal/by-auth/:authId", async (req, res, next) => {
   try {
     const internalSecret = process.env.INTERNAL_SERVICE_SECRET;
@@ -193,6 +236,37 @@ router.post("/internal/bootstrap", async (req, res, next) => {
     });
     triggerArtistReindex(artist.id);
     return res.status(201).json({ id: artist.id, authId: artist.authId, created: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// PATCH /artists/internal/by-auth/:authId/active — activa o desactiva artista (llamado desde admin ban/unban)
+router.patch("/internal/by-auth/:authId/active", async (req, res, next) => {
+  try {
+    const internalSecret = process.env.INTERNAL_SERVICE_SECRET;
+    const providedSecret = req.headers['x-internal-secret'];
+    if (!internalSecret || providedSecret !== internalSecret) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+    const { authId } = req.params;
+    const { isActive } = req.body as { isActive: boolean };
+    if (typeof isActive !== 'boolean') {
+      return res.status(400).json({ error: 'isActive (boolean) requerido' });
+    }
+    const existing = await prisma.artist.findUnique({ where: { authId } });
+    if (!existing) return res.json({ ok: true, updated: false });
+    const updated = await prisma.artist.update({
+      where: { authId },
+      data: { isActive, updatedAt: new Date() },
+      select: { id: true, authId: true, isActive: true },
+    });
+    if (isActive) {
+      triggerArtistReindex(updated.id);
+    } else {
+      triggerArtistUnindex(updated.id);
+    }
+    res.json({ ok: true, updated: true, ...updated });
   } catch (error) {
     next(error);
   }
