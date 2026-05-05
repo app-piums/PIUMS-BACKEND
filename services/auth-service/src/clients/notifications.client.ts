@@ -6,7 +6,7 @@ const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
 
 interface EmailTemplate {
   to: string;
-  template: 'password-reset' | 'email-verification' | 'payment-confirmation' | 'review-request';
+  template: 'password-reset' | 'email-verification' | 'payment-confirmation' | 'review-request' | 'document-review-alert';
   variables: Record<string, any>;
 }
 
@@ -132,6 +132,36 @@ export class NotificationsClient {
     } catch (error: any) {
       logger.error('Error sending review request email', 'NOTIFICATIONS_CLIENT', error);
       throw error;
+    }
+  }
+
+  /**
+   * Avisa al equipo que un usuario subió sus documentos y necesitan revisión manual.
+   */
+  async notifyDocumentPendingReview(data: {
+    userId: string;
+    userName: string;
+    userEmail: string;
+    userRole: string;
+    documentType: string;
+    documentNumber: string;
+  }) {
+    const adminEmail = process.env.ADMIN_ALERT_EMAIL || 'soporte@piums.io';
+    const adminUrl = `${process.env.ADMIN_URL || 'http://localhost:3002'}/users/${data.userId}`;
+    try {
+      await this.sendEmail({
+        to: adminEmail,
+        template: 'document-review-alert',
+        variables: {
+          ...data,
+          adminUrl,
+          submittedAt: new Date().toLocaleString('es-GT', { timeZone: 'America/Guatemala' }),
+          currentYear: new Date().getFullYear(),
+        },
+      });
+      logger.info('Document review alert sent', 'NOTIFICATIONS_CLIENT', { userId: data.userId });
+    } catch (err: any) {
+      logger.warn('Failed to send document review alert', 'NOTIFICATIONS_CLIENT', { error: err.message });
     }
   }
 

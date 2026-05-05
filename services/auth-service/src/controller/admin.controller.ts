@@ -809,7 +809,12 @@ export const getUserDetail = async (req: Request, res: Response, next: NextFunct
         createdAt: true,
         updatedAt: true,
         lastLoginAt: true,
-        provider: true
+        provider: true,
+        documentType: true,
+        documentNumber: true,
+        documentFrontUrl: true,
+        documentBackUrl: true,
+        documentSelfieUrl: true,
       }
     });
 

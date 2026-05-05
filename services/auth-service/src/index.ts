@@ -68,6 +68,36 @@ app.put("/internal/users/:authId/avatar", async (req, res, next) => {
   }
 });
 
+// Internal endpoint: check if a user has identity documents on file
+// Used by booking-service to gate reservation creation
+app.get("/internal/users/:authId/identity-status", async (req, res, next) => {
+  try {
+    const internalSecret = process.env.INTERNAL_SERVICE_SECRET;
+    if (!internalSecret || req.headers['x-internal-secret'] !== internalSecret) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+    const { authId } = req.params;
+    const user = await prismaInternal.user.findUnique({
+      where: { id: authId },
+      select: {
+        documentType: true,
+        documentNumber: true,
+        documentFrontUrl: true,
+        documentSelfieUrl: true,
+      },
+    });
+    const hasDocuments = !!(
+      user?.documentType &&
+      user?.documentNumber &&
+      user?.documentFrontUrl &&
+      user?.documentSelfieUrl
+    );
+    res.json({ hasDocuments });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // Middleware de error handling (debe ir al final)
 app.use(errorHandler);
 

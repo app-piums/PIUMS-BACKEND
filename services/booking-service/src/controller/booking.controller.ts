@@ -47,7 +47,12 @@ export class BookingController {
 
       // Always use the authenticated user's ID as clientId — never trust the body
       const clientId = req.user!.id;
-      
+
+      const identity = await usersClient.checkClientIdentity(clientId);
+      if (!identity.hasDocuments) {
+        throw new AppError(403, 'Debes verificar tu identidad antes de realizar una reserva. Completa tu perfil con tu documento de identidad.');
+      }
+
       const { booking } = await bookingService.createBooking({
         ...validatedData,
         clientId,

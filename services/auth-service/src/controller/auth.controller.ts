@@ -673,6 +673,20 @@ export const updateProfile = async (req: Request, res: Response, next: NextFunct
     const { id } = (req as any).user;
     const { ciudad, birthDate, documentType, documentNumber, documentFrontUrl, documentBackUrl, documentSelfieUrl } = req.body;
 
+    // Snapshot before update — used to detect first-time document submission
+    const before = await prisma.user.findUnique({
+      where: { id },
+      select: {
+        nombre: true,
+        email: true,
+        role: true,
+        documentType: true,
+        documentFrontUrl: true,
+        documentSelfieUrl: true,
+      },
+    });
+    const hadDocsBefore = !!(before?.documentType && before?.documentFrontUrl && before?.documentSelfieUrl);
+
     const updateData: Record<string, unknown> = {};
     if (ciudad !== undefined) updateData.ciudad = ciudad;
     if (birthDate !== undefined) updateData.birthDate = birthDate ? new Date(birthDate) : null;
@@ -725,6 +739,18 @@ export const updateProfile = async (req: Request, res: Response, next: NextFunct
       } catch (err: any) {
         logger.warn(`Failed to notify artist verification: ${err.message}`, 'AUTH_CONTROLLER');
       }
+    }
+
+    // First-time document submission → alert the team for manual review
+    if (hasDocs && !hadDocsBefore && before) {
+      notificationsClient.notifyDocumentPendingReview({
+        userId: user.id,
+        userName: before.nombre || user.email,
+        userEmail: user.email,
+        userRole: user.role,
+        documentType: user.documentType!,
+        documentNumber: user.documentNumber!,
+      }).catch(() => {});
     }
 
     res.json({ user });
